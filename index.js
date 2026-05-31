@@ -1,4 +1,3 @@
-// ✨ FIXED SETUP SEQUENCE
 const express = require('express');
 const path = require('path'); 
 require('dotenv').config({ path: path.join(__dirname, '.env') });
@@ -10,7 +9,7 @@ const multer = require('multer');
 const fs = require('fs');
 const dns = require('dns');
 
-// 🛠️ VERCEL READ-ONLY SYSTEM FIX
+// 🛠️ VERCEL READ-ONLY SYSTEM FIX: Use serverless OS temp directory
 const uploadDir = '/tmp/uploads';
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
@@ -35,20 +34,35 @@ app.use(cors());
 app.use('/uploads', express.static(uploadDir));
 app.use(express.json());
 
-// DATABASE CONNECTION
-mongoose.connect(process.env.MONGODB_URI)
-  .then(() => console.log("Connected to DB"))
-  .catch(err => console.error("MongoDB Core Connection Error:", err));
+// ⚡ SERVERLESS OPTIMIZATION: Cache the database connection pool across function calls
+let isConnected = false;
 
-// Rest of your routes stay exactly the same...
+const connectDB = async () => {
+  if (isConnected && mongoose.connection.readyState === 1) {
+    return;
+  }
+  
+  console.log("Connecting to MongoDB Atlas...");
+  try {
+    const db = await mongoose.connect(process.env.MONGODB_URI, {
+      serverSelectionTimeoutMS: 5000, // Stop hanging if connection fails
+    });
+    isConnected = db.connections[0].readyState === 1;
+    console.log("Connected to DB cleanly.");
+  } catch (error) {
+    console.error("Database connection failed:", error);
+    throw error;
+  }
+};
 
 // GET ALL CONTACTS
 app.get('/contacts', async (req, res) => {
   try {
+    await connectDB(); // Ensure DB connection is ready
     const allContacts = await contact.find();
     res.json(allContacts);
   } catch (err) {
-    res.status(500).json({ error: "Failed to fetch" });
+    res.status(500).json({ error: "Failed to fetch", details: err.message });
   }
 });
 
@@ -56,21 +70,15 @@ app.get('/contacts', async (req, res) => {
 app.get('/', (req, res) => {
   res.status(200).json({
     status: "success",
-    message: "Contact API Server is live and running smoothly!",
-    timestamp: new Date(),
-    endpoints: {
-      getAllContacts: "/contacts (GET)",
-      addContact: "/add-contact (POST)",
-      getSingleContact: "/contacts/:id (GET)",
-      updateContact: "/update-contact/:id (PUT)",
-      deleteContact: "/delete-contact/:id (DELETE)"
-    }
+    message: "Contact API Server is live and running smoothly!"
   });
 });
 
 // ADD CONTACT
 app.post('/add-contact', upload.single('img'), async (req, res) => {
   try {
+    await connectDB(); // Ensure DB connection is ready before trying to save
+    
     console.log("Body:", req.body);
     console.log("File:", req.file);
 
@@ -80,25 +88,18 @@ app.post('/add-contact', upload.single('img'), async (req, res) => {
       img: req.file ? `/uploads/${path.basename(req.file.path)}` : ""
     });
 
-    console.log("Contact to save:", newContact);
-
     await newContact.save();
-
-    console.log("Saved successfully!");
-
     res.status(201).json(newContact);
-
   } catch (err) {
-  console.error("SAVE ERROR:", err);
-  res.status(500).json({
-    message: err.message,
-    error: err
-  });
-}
+    console.error("SAVE ERROR:", err);
+    res.status(500).json({ error: "Upload failed", message: err.message });
+  }
 });
+
 // GET SINGLE CONTACT
 app.get('/contacts/:id', async (req, res) => {
   try {
+    await connectDB();
     const contactData = await contact.findById(req.params.id);  
     if (!contactData) {
       return res.status(404).json({ error: "Contact not found" });
@@ -112,6 +113,7 @@ app.get('/contacts/:id', async (req, res) => {
 // UPDATE CONTACT
 app.put('/update-contact/:id', upload.single('img'), async (req, res) => {
   try {
+    await connectDB();
     const updateData = {
       name: req.body.name,
       phone: req.body.phone
@@ -133,7 +135,6 @@ app.put('/update-contact/:id', upload.single('img'), async (req, res) => {
 
     res.json(updatedContact);
   } catch (err) {
-    console.error("Update Error:", err);
     res.status(500).json({ error: "Failed to update contact" });
   }
 });
@@ -141,6 +142,7 @@ app.put('/update-contact/:id', upload.single('img'), async (req, res) => {
 // DELETE CONTACT
 app.delete('/delete-contact/:id', async (req, res) => {
   try {
+    await connectDB();
     const deletedContact = await contact.findByIdAndDelete(req.params.id);
     if (!deletedContact) {
       return res.status(404).json({ error: "Contact not found" });
@@ -156,13 +158,12 @@ app.delete('/delete-contact/:id', async (req, res) => {
 
     res.json({ message: "Contact deleted successfully" });
   } catch (err) {
-    console.error("Delete Error:", err);
     res.status(500).json({ error: "Failed to delete contact" });
   }
 });
 
 app.listen(port, () => {
-  console.log(`Server is running on http://localhost:${port}`);
+  console.log(`Server is running on port ${port}`);
 });
 
 module.exports = app;
