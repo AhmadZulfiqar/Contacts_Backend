@@ -1,14 +1,16 @@
+// ✨ FIXED SETUP SEQUENCE
 const express = require('express');
-require('dotenv').config();
+const path = require('path'); 
+require('dotenv').config({ path: path.join(__dirname, '.env') });
+
 const cors = require('cors');
 const mongoose = require('mongoose');
 const contact = require('./models/schema'); 
-const path = require('path');
 const multer = require('multer');
 const fs = require('fs');
 const dns = require('dns');
 
-// 🛠️ FIX FOR VERCEL READ-ONLY SYSTEM: Use serverless OS temp directory
+// 🛠️ VERCEL READ-ONLY SYSTEM FIX
 const uploadDir = '/tmp/uploads';
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
@@ -19,7 +21,6 @@ const storage = multer.diskStorage({
     cb(null, uploadDir); 
   },
   filename: (req, file, cb) => {
-    // Save file with timestamp to avoid name conflicts
     cb(null, Date.now() + path.extname(file.originalname));
   }
 });
@@ -31,14 +32,15 @@ const port = process.env.PORT || 3000;
 
 // MIDDLEWARE
 app.use(cors());
-// Expose the temporary uploads directory over the web path
 app.use('/uploads', express.static(uploadDir));
-app.use(express.json()); // This parses JSON bodies
+app.use(express.json());
 
 // DATABASE CONNECTION
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log("Connected to DB"))
-  .catch(err => console.log(err));
+  .catch(err => console.error("MongoDB Core Connection Error:", err));
+
+// Rest of your routes stay exactly the same...
 
 // GET ALL CONTACTS
 app.get('/contacts', async (req, res) => {
@@ -69,21 +71,31 @@ app.get('/', (req, res) => {
 // ADD CONTACT
 app.post('/add-contact', upload.single('img'), async (req, res) => {
   try {
+    console.log("Body:", req.body);
+    console.log("File:", req.file);
+
     const newContact = new contact({
       name: req.body.name,
       phone: req.body.phone,
-      // We rewrite the string path so the frontend can still call /uploads/filename
-      img: req.file ? `/uploads/${path.basename(req.file.path)}` : "" 
+      img: req.file ? `/uploads/${path.basename(req.file.path)}` : ""
     });
-    await newContact.save();
-    console.log("New contact added:", newContact);
-    res.status(201).json(newContact);
-  } catch (err) {
-    console.error("Add Error:", err);
-    res.status(500).json({ error: "Upload failed" });
-  }
-});
 
+    console.log("Contact to save:", newContact);
+
+    await newContact.save();
+
+    console.log("Saved successfully!");
+
+    res.status(201).json(newContact);
+
+  } catch (err) {
+  console.error("SAVE ERROR:", err);
+  res.status(500).json({
+    message: err.message,
+    error: err
+  });
+}
+});
 // GET SINGLE CONTACT
 app.get('/contacts/:id', async (req, res) => {
   try {
