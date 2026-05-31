@@ -8,27 +8,33 @@ const multer = require('multer');
 const fs = require('fs');
 const dns = require('dns');
 
+// 🛠️ FIX FOR VERCEL READ-ONLY SYSTEM: Use serverless OS temp directory
+const uploadDir = '/tmp/uploads';
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => { 
-    cb(null, 'uploads/'); 
+    cb(null, uploadDir); 
   },
   filename: (req, file, cb) => {
     // Save file with timestamp to avoid name conflicts
     cb(null, Date.now() + path.extname(file.originalname));
   }
-})
+});
 const upload = multer({ storage: storage });
-dns.setServers(['1.1.1.1',"8.8.8.8"]);
+dns.setServers(['1.1.1.1', "8.8.8.8"]);
 
 const app = express();
 const port = process.env.PORT || 3000;
 
 // MIDDLEWARE
 app.use(cors());
-app.use('/uploads', express.static('uploads'));
+// Expose the temporary uploads directory over the web path
+app.use('/uploads', express.static(uploadDir));
 app.use(express.json()); // This parses JSON bodies
 
-// DATABASE CONNECTION
 // DATABASE CONNECTION
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log("Connected to DB"))
@@ -43,6 +49,7 @@ app.get('/contacts', async (req, res) => {
     res.status(500).json({ error: "Failed to fetch" });
   }
 });
+
 // UNIVERSAL API ROOT ROUTE
 app.get('/', (req, res) => {
   res.status(200).json({
@@ -59,21 +66,24 @@ app.get('/', (req, res) => {
   });
 });
 
-// ADD CONTACT (Modified to remove Multer)
+// ADD CONTACT
 app.post('/add-contact', upload.single('img'), async (req, res) => {
   try {
     const newContact = new contact({
       name: req.body.name,
       phone: req.body.phone,
-      img: req.file ? req.file.path.replace(/\\/g, "/") : "" 
+      // We rewrite the string path so the frontend can still call /uploads/filename
+      img: req.file ? `/uploads/${path.basename(req.file.path)}` : "" 
     });
     await newContact.save();
     console.log("New contact added:", newContact);
     res.status(201).json(newContact);
   } catch (err) {
+    console.error("Add Error:", err);
     res.status(500).json({ error: "Upload failed" });
   }
 });
+
 // GET SINGLE CONTACT
 app.get('/contacts/:id', async (req, res) => {
   try {
@@ -88,21 +98,17 @@ app.get('/contacts/:id', async (req, res) => {
 });
 
 // UPDATE CONTACT
-// 1. Add 'upload.single' here to handle the FormData
 app.put('/update-contact/:id', upload.single('img'), async (req, res) => {
   try {
-    // 2. Prepare the update object
     const updateData = {
       name: req.body.name,
       phone: req.body.phone
     };
 
-    // 3. Check if a new image was uploaded
     if (req.file) {
-      updateData.img = req.file.path.replace(/\\/g, "/");
+      updateData.img = `/uploads/${path.basename(req.file.path)}`;
     }
 
-    // 4. Update the document
     const updatedContact = await contact.findByIdAndUpdate(
       req.params.id, 
       updateData, 
@@ -128,13 +134,17 @@ app.delete('/delete-contact/:id', async (req, res) => {
       return res.status(404).json({ error: "Contact not found" });
     }
 
-    // Simple check: if it has an image, delete it from the folder
-    if (deletedContact.img && fs.existsSync(deletedContact.img)) {
-      fs.unlinkSync(deletedContact.img);
+    if (deletedContact.img) {
+      const fileName = path.basename(deletedContact.img);
+      const fullPath = path.join(uploadDir, fileName);
+      if (fs.existsSync(fullPath)) {
+        fs.unlinkSync(fullPath);
+      }
     }
 
     res.json({ message: "Contact deleted successfully" });
   } catch (err) {
+    console.error("Delete Error:", err);
     res.status(500).json({ error: "Failed to delete contact" });
   }
 });
