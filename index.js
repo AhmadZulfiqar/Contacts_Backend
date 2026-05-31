@@ -43,6 +43,21 @@ app.get('/contacts', async (req, res) => {
     res.status(500).json({ error: "Failed to fetch" });
   }
 });
+// UNIVERSAL API ROOT ROUTE
+app.get('/', (req, res) => {
+  res.status(200).json({
+    status: "success",
+    message: "Contact API Server is live and running smoothly!",
+    timestamp: new Date(),
+    endpoints: {
+      getAllContacts: "/contacts (GET)",
+      addContact: "/add-contact (POST)",
+      getSingleContact: "/contacts/:id (GET)",
+      updateContact: "/update-contact/:id (PUT)",
+      deleteContact: "/delete-contact/:id (DELETE)"
+    }
+  });
+});
 
 // ADD CONTACT (Modified to remove Multer)
 app.post('/add-contact', upload.single('img'), async (req, res) => {
